@@ -27,8 +27,11 @@ import psycopg2
 import psycopg2.extras
 
 from PyQt4 import QtGui, uic, QtCore
-from PyQt4.QtCore import pyqtSignal, QSettings
-from PyQt4.QtGui import QListWidgetItem
+from PyQt4.QtGui import QListWidgetItem, QColor
+from PyQt4.QtCore import pyqtSignal, QSettings, QSizeF, QPointF
+
+from qgis.core import QgsMarkerSymbolV2, QgsSimpleMarkerSymbolLayerV2,  QgsPoint
+from qgis.gui import QgsTextAnnotationItem
 
 FORM_CLASS, _ = uic.loadUiType(os.path.join(
     os.path.dirname(__file__), 'annotation_saver_dockwidget_base.ui'))
@@ -55,25 +58,16 @@ class AnnotationSaverDockWidget(QtGui.QDockWidget, FORM_CLASS):
         self.wfetchAnnotationsButton.clicked.connect(self.fetchAnnotations_click)
         
         self.wlistSchemas.currentIndexChanged.connect(self.wlistSchemas_click)
-        self.waddTableButton.clicked.connect(self.waddTableButton_click)
         self.wlistAnnotations.currentItemChanged.connect(self.wlistAnnotations_changed)
+
+        self.waddTableButton.clicked.connect(self.waddTableButton_click)
+        self.wplaceAnnotationsButton.clicked.connect(self.wplaceAnnotationsButton_click)
+        self.wdeleteAnnotationsButton.clicked.connect(self.wdeleteAnnotationsButton_click)
+        
         self.layers = self.iface.legendInterface().layers()
-
-    def getPrefix(self):
-        return self.waddTablePrefix.displayText() or 'saved' 
-    
-    def getSchema(self):
-        return  self.wlistSchemas.currentText()
-
-    def getLayer(self):
-        return  self.wlistLayers.currentText() or ''
-
-    def getTable(self):
-        prefix = self.getPrefix()
-        return  prefix + '_' + self.table_annotations
-
-    def getAnnotation(self):
-        return self.wlistAnnotations.currentItem()
+        
+        self.annotationBox.setDisabled(True)
+        self.addTableBox.setDisabled(True)
 
     def saveAnnotations(self):
         annotations = self.collectAnnotations()
@@ -84,15 +78,123 @@ class AnnotationSaverDockWidget(QtGui.QDockWidget, FORM_CLASS):
             cur.execute(query)
             
         self.conn.commit()
-    
-    def setDefaultTable(self):
-        itemIndex = self.wlistTables.findText(self.table_annotations, QtCore.Qt.MatchContains)
-        self.wlistTables.setCurrentIndex(itemIndex)
-    
-    def setDefaultSchema(self):
-        itemIndex = self.wlistSchemas.findText('public')
-        self.wlistSchemas.setCurrentIndex(itemIndex)
-    
+   
+    def wplaceAnnotationsButton_click(self):
+        annotations = self.getSelectedAnnotations()
+        for anno in annotations:
+            annoData = anno.data(1)
+            annotation = QgsTextAnnotationItem(self.iface.mapCanvas())
+            
+            #Make data accessible from annotation
+            annotation.setData(1, annoData) 
+            
+            doc = annotation.document()
+            #"layer": self.getLayer(),
+            #"srid": crs.postgisSrid(), 
+            #"label":  label[0:256] , 
+            
+            #"content": annotation.document().toHtml().replace("'","''"), 
+            doc.setHtml(annoData.get('content', None))
+            annotation.setDocument(doc)
+            
+            #"frame_color":annotation.frameColor().name(),
+            color = QColor()
+            color.setNamedColor(annoData.get('frame_color'))
+            annotation.setFrameColor(color)
+            
+             #"bg_color": annotation.frameBackgroundColor().name(),
+            color = QColor()
+            color.setNamedColor(annoData.get('bg_color'))
+            annotation.setFrameBackgroundColor(color)
+            
+            #"frame_width": frame_size.width(),
+            #"frame_height": frame_size.height(),
+            size = QSizeF()
+            size.setWidth(annoData.get('frame_width'))
+            size.setHeight(annoData.get('frame_height'))
+            annotation.setFrameSize(size)
+            
+            #"frame_border_width": annotation.frameBorderWidth(),
+            width = float(annoData.get('frame_border_width'))
+            annotation.setFrameBorderWidth(width)
+
+            #"map_position_x": map_position_x, 
+            #"map_position_y": map_position_y, 
+            map_position_x = float(annoData.get('map_position_x'))
+            map_position_y = float(annoData.get('map_position_y'))
+            annotation.setMapPosition(QgsPoint(map_position_x,map_position_y ))
+            
+            #"offset_x": ref_offset.x(),
+            #"offset_y": ref_offset.y(),
+            offset_x = float(annoData.get('offset_x'))
+            offset_y = float(annoData.get('offset_y'))
+            annotation.setOffsetFromReferencePoint(QPointF(offset_x, offset_y))
+            
+            #"marker_symbol": json.dumps(self.dumpMarkerSymbol(marker))
+            symbol_container = annoData.get('marker_symbol') 
+            
+            new_marker_symbol = QgsMarkerSymbolV2()
+            #'color':marker.color().name(), 
+            color = QColor()
+            color.setNamedColor(symbol_container.get('color'))
+            new_marker_symbol.setColor(color)
+            
+            #'alpha':marker.alpha(), 
+            alpha = float(new_marker_symbol.get('alpha'))
+            new_marker_symbol.setAlpha(alpha)
+
+            #'output_unit': marker.outputUnit(), 
+            output_unit = new_marker_symbol.get('output_unit')
+            new_marker_symbol.setOutputUnit(output_unit)
+            
+            #'angle': marker.angle(), 
+            angle = float(new_marker_symbol.get('angle'))
+            new_marker_symbol.setAngle(angle)
+            
+            #'size': marker.size(), 
+            size = new_marker_symbol.get('size')
+            new_marker_symbol.setSize(size)
+            
+            #'size_unit': marker.sizeUnit(), 
+            
+        for properties in symbol_container.get('symbol_layers'):
+                print properties
+                #properties = json.loads(properties)
+                new_symbol_layer = QgsSimpleMarkerSymbolLayerV2()
+                new_symbol_layer.restoreDataDefinedProperties(properties)
+                new_marker_symbol.appendSymbolLayer(new_symbol_layer)
+                
+            annotation.setMarkerSymbol(new_marker_symbol)
+            
+            #scene = self.iface.mapCanvas.scene()
+            #scene.addItem(annotation)
+            
+    def wdeleteAnnotationsButton_click(self):
+        annotations = self.getSelectedAnnotations()
+        for annotation in annotations:
+            anno = annotation.data(1)
+            print anno
+            
+    def fetchAnnotations_click(self):
+        rows = self.fetchAnnotations()
+        self.wlistAnnotations.clear()
+        for row in rows:
+            item = QListWidgetItem()
+            item.setData(1, row)
+            item.setText(str(row['label']))
+            self.wlistAnnotations.addItem(item)
+   
+    def fetchAnnotations(self):
+        cur = self.conn.cursor(cursor_factory = psycopg2.extras.RealDictCursor)
+        layer = self.getLayer()
+        table = self.getTable()
+        query = """
+            SELECT * FROM {table} WHERE layer = '{layer}'
+        """.format(table=table, layer=layer)
+        cur.execute(query)
+        rows = cur.fetchall()
+        return rows
+
     def setAnnotationText(self, html):
         self.weditAnnotations.setHtml(html)
         self.weditAnnotations.textChanged.connect(self.annotationText_changed)
@@ -103,43 +205,12 @@ class AnnotationSaverDockWidget(QtGui.QDockWidget, FORM_CLASS):
         row = item.data(1)
         row['content'] = html
         item.setData(1, row)
-        
-    def fetchAnnotations_click(self):
-        rows = self.fetchAnnotations()
-        self.wlistAnnotations.clear()
-        for row in rows:
-            item = QListWidgetItem()
-            item.setData(1, row)
-            item.setText(str(row['fid']))
-            self.wlistAnnotations.addItem(item)
 
     def wlistAnnotations_changed(self, item):
-        row = item.data(1)
-        print row
-        content = row.get('content',  None)
-        if content:
-            self.setAnnotationText(content)
-    
-    def fetchAnnotations(self):
-        cur = self.conn.cursor(cursor_factory = psycopg2.extras.RealDictCursor)
-        layer = self.getLayer()
-        table = self.getTable()
-        query = """
-            SELECT * FROM {table} WHERE layer = '{layer}'
-        """.format(table=table, layer=layer)
-        print query
-        cur.execute(query)
-        rows = cur.fetchall()
-        
-        return rows
-    
-    def connectDatabase(self):
-        conn = self.wdatabaseConnections.currentText()
-        self.setConnection(conn)
-        self.wlistSchemas.addItems(self.getSchemas())
-        self.setDefaultSchema()
-        self.setDefaultTable()
-        
+        #row = item.data(1)
+        #content = row.get('content',  None)
+        pass
+
     def wlistSchemas_click(self, item):
         tables = self.getTables(self.wlistSchemas.currentText())
         self.wlistTables.clear()
@@ -193,6 +264,15 @@ class AnnotationSaverDockWidget(QtGui.QDockWidget, FORM_CLASS):
             "marker_symbol": json.dumps(self.dumpMarkerSymbol(marker))
         }
     
+    def connectDatabase(self):
+        conn = self.wdatabaseConnections.currentText()
+        self.setConnection(conn)
+        self.wlistSchemas.addItems(self.getSchemas())
+        self.setDefaultSchema()
+        self.setDefaultTable()
+        self.annotationBox.setDisabled(False)
+        self.addTableBox.setDisabled(False)
+
     def insertAnnotationQuery(self, data, prefix=None, table=None, schema=None):
         schema = schema or self.getSchema()
         prefix = self.getPrefix()
@@ -241,6 +321,7 @@ class AnnotationSaverDockWidget(QtGui.QDockWidget, FORM_CLASS):
         tables = self.getTables(schema=schema)
         self.wlistTables.clear()
         self.wlistTables.addItems(tables)
+        self.setDefaultTable()
         
     def getSchemas(self):
         cur = self.conn.cursor()
@@ -281,8 +362,34 @@ class AnnotationSaverDockWidget(QtGui.QDockWidget, FORM_CLASS):
             s.value("port", type=int )
         )
         s.endGroup()          
-        print conn_string
         self.conn = psycopg2.connect(conn_string)
+
+    def getPrefix(self):
+        return self.waddTablePrefix.displayText() or 'saved' 
+    
+    def getSchema(self):
+        return  self.wlistSchemas.currentText()
+
+    def getLayer(self):
+        return  self.wlistLayers.currentText() or ''
+
+    def getTable(self):
+        prefix = self.getPrefix()
+        return  prefix + '_' + self.table_annotations
+
+    def getAnnotation(self):
+        return self.wlistAnnotations.currentItem()
+    
+    def getSelectedAnnotations(self):
+        return self.wlistAnnotations.selectedItems()
+    
+    def setDefaultTable(self):
+        itemIndex = self.wlistTables.findText(self.table_annotations, QtCore.Qt.MatchContains)
+        self.wlistTables.setCurrentIndex(itemIndex)
+    
+    def setDefaultSchema(self):
+        itemIndex = self.wlistSchemas.findText('public')
+        self.wlistSchemas.setCurrentIndex(itemIndex)
         
     def closeEvent(self, event):
         self.closingPlugin.emit()
