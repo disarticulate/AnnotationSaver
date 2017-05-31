@@ -78,6 +78,7 @@ class AnnotationSaverDockWidget(QtGui.QDockWidget, FORM_CLASS):
             cur.execute(query)
             
         self.conn.commit()
+        self.fetchAnnotations_click()
    
     def wplaceAnnotationsButton_click(self):
         annotations = self.getSelectedAnnotations()
@@ -131,50 +132,55 @@ class AnnotationSaverDockWidget(QtGui.QDockWidget, FORM_CLASS):
             annotation.setOffsetFromReferencePoint(QPointF(offset_x, offset_y))
             
             #"marker_symbol": json.dumps(self.dumpMarkerSymbol(marker))
-            symbol_container = annoData.get('marker_symbol') 
+            marker_symbol = annoData.get('marker_symbol') 
             
             new_marker_symbol = QgsMarkerSymbolV2()
             #'color':marker.color().name(), 
             color = QColor()
-            color.setNamedColor(symbol_container.get('color'))
+            color.setNamedColor(marker_symbol.get('color'))
             new_marker_symbol.setColor(color)
             
             #'alpha':marker.alpha(), 
-            alpha = float(new_marker_symbol.get('alpha'))
+            alpha = float(marker_symbol.get('alpha'))
             new_marker_symbol.setAlpha(alpha)
 
             #'output_unit': marker.outputUnit(), 
-            output_unit = new_marker_symbol.get('output_unit')
+            output_unit = marker_symbol.get('output_unit')
             new_marker_symbol.setOutputUnit(output_unit)
             
             #'angle': marker.angle(), 
-            angle = float(new_marker_symbol.get('angle'))
+            angle = float(marker_symbol.get('angle'))
             new_marker_symbol.setAngle(angle)
             
             #'size': marker.size(), 
-            size = new_marker_symbol.get('size')
+            size = float(marker_symbol.get('size'))
             new_marker_symbol.setSize(size)
             
             #'size_unit': marker.sizeUnit(), 
+            size_unit = marker_symbol.get('size_unit')
+            new_marker_symbol.setSizeUnit(size_unit)
             
-        for properties in symbol_container.get('symbol_layers'):
-                print properties
-                #properties = json.loads(properties)
-                new_symbol_layer = QgsSimpleMarkerSymbolLayerV2()
-                new_symbol_layer.restoreDataDefinedProperties(properties)
-                new_marker_symbol.appendSymbolLayer(new_symbol_layer)
-                
+            #'symbol_layers': [self.dumpSymbolLayer(layer) for layer in marker.symbolLayers()]
+            
+            for properties in marker_symbol.get('symbol_layers'):
+                    print properties
+                    #properties = json.loads(properties)
+                    new_symbol_layer = QgsSimpleMarkerSymbolLayerV2()
+                    new_symbol_layer.restoreDataDefinedProperties(properties)
+                    new_marker_symbol.appendSymbolLayer(new_symbol_layer)
+    
             annotation.setMarkerSymbol(new_marker_symbol)
-            
-            #scene = self.iface.mapCanvas.scene()
-            #scene.addItem(annotation)
             
     def wdeleteAnnotationsButton_click(self):
         annotations = self.getSelectedAnnotations()
+        cur = self.conn.cursor()
         for annotation in annotations:
             anno = annotation.data(1)
-            print anno
-            
+            command = self.deleteAnnotationQueryByFid(anno.get('fid'))
+            cur.execute(command)
+        self.conn.commit()
+        self.fetchAnnotations_click()
+        
     def fetchAnnotations_click(self):
         rows = self.fetchAnnotations()
         self.wlistAnnotations.clear()
@@ -291,7 +297,18 @@ class AnnotationSaverDockWidget(QtGui.QDockWidget, FORM_CLASS):
                 '{marker_symbol}');
         """.format(schema=schema,prefix=prefix,table=table, **data)
         return command
-        
+
+    def deleteAnnotationQueryByFid(self, fid, prefix=None, table=None, schema=None):
+        schema = schema or self.getSchema()
+        prefix = self.getPrefix()
+        table = self.table_annotations
+        command = """
+            DELETE FROM "{schema}"."{prefix}_{table}"
+                WHERE fid = {fid};
+        """.format(schema=schema,prefix=prefix,table=table, fid=fid)
+        return command
+
+
     def createAnnotationTable(self, prefix=None,  schema=None):
         schema = schema or self.getSchema()
         prefix = self.getPrefix()
